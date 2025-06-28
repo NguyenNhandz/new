@@ -12,8 +12,8 @@ type table = {
 _G.Configuration = {
 	--// Reporting
 	["Enabled"] = true,
-	["Webhook_Stock"] = "https://discord.com/api/webhooks/webhook_stock", -- Webhook 1: STOCK
-	["Webhook_Log"] = "https://discord.com/api/webhooks/webhook_log",     -- Webhook 2: Log (AFK/Rejoin)
+	["Webhook_Stock"] = "https://discord.com/api/webhooks/1388136766648746145/A8as0rs5kUSWxMQQLagMbrc41Ef3tyoer8YR25tvVk0i3guNkEiiWnhooj4YP6COuVbj", -- Webhook 1: STOCK
+	["Webhook_Log"] = "https://discord.com/api/webhooks/1388136802342146208/LqqE8pdN3JyzX2EXt4rf282ewLGClVPtnE2jZhq7KyzTfDiY5-r_sYr3RdzMq-TMHRql",     -- Webhook 2: Log (AFK/Rejoin)
 	["Weather Reporting"] = true,
 
 	--// User
