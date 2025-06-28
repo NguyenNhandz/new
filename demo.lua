@@ -1,196 +1,94 @@
 --[[
-    Grow a Garden – FULL Stock Bot
-    Author  : depso (depthso)
-    Mod by  : Nguyen Nhan
-    Game ID : 126884695634066
-    Features: Stock reporting • Weather log • Anti‑AFK • Auto‑Rejoin • Dual‑Webhook
+    Grow a Garden – System Monitor Bot
+    Author : depso (gốc) | Mod : Nguyen Nhan
+    Tính năng: Weather + Anti-AFK + Rejoin + Webhook + System Status cập nhật mỗi 1s
 ]]
 
-type table = { [any]: any }
-
---// USER CONFIG ----------------------------------------------------------------
-_G.Configuration = {
-    -- Reporting
-    ["Enabled"]          = true,
-    ["Webhook_Stock"]    = "https://discord.com/api/webhooks/1388136766648746145/A8as0rs5kUSWxMQQLagMbrc41Ef3tyoer8YR25tvVk0i3guNkEiiWnhooj4YP6COuVbj",
-    ["Webhook_Log"]      = "https://discord.com/api/webhooks/1388136802342146208/LqqE8pdN3JyzX2EXt4rf282ewLGClVPtnE2jZhq7KyzTfDiY5-r_sYr3RdzMq-TMHRql",
-    ["Weather Reporting"]= true,
-
-    -- Client
-    ["Anti-AFK"]         = true,
-    ["Auto-Reconnect"]   = true,
-    ["Rendering Enabled"]= false,  -- tắt 3D để tiết kiệm tài nguyên executor
-
-    -- Embed layouts / colours
-    ["AlertLayouts"] = {
-        ["Weather"] = {
-            WebhookTarget = "Webhook_Log",
-            EmbedColor    = Color3.fromRGB( 42,109,255)
-        },
-        ["SeedsAndGears"] = {
-            WebhookTarget = "Webhook_Stock",
-            EmbedColor    = Color3.fromRGB( 56,238, 23),
-            Layout = {
-                ["ROOT/SeedStock/Stocks"] = "SEEDS STOCK",
-                ["ROOT/GearStock/Stocks"] = "GEAR STOCK"
-            }
-        },
-        ["EventShop"] = {
-            WebhookTarget = "Webhook_Stock",
-            EmbedColor    = Color3.fromRGB(212, 42,255),
-            Layout = {
-                ["ROOT/EventShopStock/Stocks"] = "EVENT STOCK"
-            }
-        },
-        ["Eggs"] = {
-            WebhookTarget = "Webhook_Stock",
-            EmbedColor    = Color3.fromRGB(251,255, 14),
-            Layout = {
-                ["ROOT/PetEggStock/Stocks"] = "EGG STOCK"
-            }
-        },
-        ["CosmeticStock"] = {
-            WebhookTarget = "Webhook_Stock",
-            EmbedColor    = Color3.fromRGB(255,106, 42),
-            Layout = {
-                ["ROOT/CosmeticStock/ItemStocks"] = "COSMETIC ITEMS STOCK"
-            }
-        }
-    }
-}
---// ---------------------------------------------------------------------------
-
-
---// SERVICES -------------------------------------------------------------------
-local Players          = game:GetService("Players")
-local ReplicatedStorage= game:GetService("ReplicatedStorage")
 local HttpService      = game:GetService("HttpService")
+local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
+local VirtualUser      = cloneref(game:GetService("VirtualUser"))
 local GuiService       = game:GetService("GuiService")
 local TeleportService  = game:GetService("TeleportService")
-local VirtualUser      = cloneref(game:GetService("VirtualUser"))
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local Stats            = game:GetService("Stats")
 
-local DataStream           = ReplicatedStorage.GameEvents.DataStream     -- RemoteEvent
-local WeatherEventStarted  = ReplicatedStorage.GameEvents.WeatherEventStarted
+local LP = Players.LocalPlayer
+local JobId = game.JobId
+local PlaceId = game.PlaceId
 
-local LocalPlayer  = Players.LocalPlayer
-local PlaceId      = game.PlaceId
-local JobId        = game.JobId
---// ---------------------------------------------------------------------------
+-- CONFIG
+local WEBHOOK = "https://discord.com/api/webhooks/1388136802342146208/LqqE8pdN3JyzX2EXt4rf282ewLGClVPtnE2jZhq7KyzTfDiY5-r_sYr3RdzMq-TMHRql"
+local SCRIPT_URL = "https://raw.githubusercontent.com/NguyenNhandz/new/main/demo.lua"
 
-
---// HELPER FUNCTIONS -----------------------------------------------------------
-local function cfg(key:string)  return _G.Configuration[key] end
-local function hex(c:Color3)    return tonumber(c:ToHex(),16) end
-
-local function getPacket(list, target:string)
-    for _, p in list do
-        if p[1]==target then return p[2] end
-    end
-end
-
-local function webhookSend(layoutType:string, fields:table)
-    if not cfg"Enabled" then return end
-    local layout = cfg"AlertLayouts"[layoutType]; if not layout then return end
-    local url    = cfg(layout.WebhookTarget or "Webhook_Log")
-    local body   = {
+-- FUNCTIONS
+local function sendEmbed(title, desc, color)
+    local data = {
         embeds = {{
-            color     = hex(layout.EmbedColor),
-            fields    = fields,
-            footer    = { text = "Made by depso • Mod by Nguyen Nhan" },
+            title = title,
+            description = desc,
+            color = color or 16777215,
+            footer = { text = "Nguyen Nhan • Roblox Auto Monitor" },
             timestamp = DateTime.now():ToIsoDate()
         }}
     }
     task.spawn(request, {
-        Url     = url,
-        Method  = "POST",
-        Headers = {["Content-Type"]="application/json"},
-        Body    = HttpService:JSONEncode(body)
+        Url = WEBHOOK,
+        Method = "POST",
+        Headers = { ["Content-Type"] = "application/json" },
+        Body = HttpService:JSONEncode(data)
     })
 end
 
-local function simpleLog(txt:string)
-    task.spawn(request,{
-        Url     = cfg"Webhook_Log",
-        Method  = "POST",
-        Headers = {["Content-Type"]="application/json"},
-        Body    = HttpService:JSONEncode({content="**[LOG]** "..txt})
-    })
-end
+-- Startup
+sendEmbed("✅ Bắt đầu giám sát", LP.Name .. " đã vào game!\nJobId: `" .. JobId .. "`", 0x2ecc71)
 
-local function stockString(stock:table):string
-    local s=""; for name,data in stock do
-        local amount,alt = data.Stock, data.EggName
-        s ..= (alt or name).." **x"..amount.."**\n"
-    end; return s
-end
---// ---------------------------------------------------------------------------
+-- Anti-AFK
+LP.Idled:Connect(function()
+    VirtualUser:CaptureController()
+    VirtualUser:ClickButton2(Vector2.new())
+    sendEmbed("💤 Anti-AFK", LP.Name .. " đã được cứu khỏi AFK!", 0x3498db)
+end)
 
+-- Auto Rejoin
+GuiService.ErrorMessageChanged:Connect(function()
+    sendEmbed("🔁 Rejoin", LP.Name .. " bị disconnect, đang vào lại...", 0xe67e22)
+    queue_on_teleport("loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()")
+    wait(5)
+    TeleportService:TeleportToPlaceInstance(PlaceId, JobId, LP)
+end)
 
---// ONE‑TIME INITIALISATION ----------------------------------------------------
-if _G.StockBot then return end  -- tránh chạy file hai lần
-_G.StockBot = true
+-- Weather
+ReplicatedStorage:WaitForChild("GameEvents"):WaitForChild("WeatherEventStarted").OnClientEvent:Connect(function(Event, Length)
+    local endUnix = math.floor(workspace:GetServerTimeNow()) + Length
+    sendEmbed("⛅ Weather", "**" .. Event .. "**\nKết thúc: <t:" .. endUnix .. ":R>", 0x9b59b6)
+end)
 
-RunService:Set3dRenderingEnabled(cfg"Rendering Enabled") -- giảm lag
+-- SYSTEM STATUS REPORT (1s/lần)
+task.spawn(function()
+    local startTime = os.clock()
+    while true do
+        pcall(function()
+            local uptime = os.clock() - startTime
+            local mem = math.floor(Stats:GetTotalMemoryUsageMb())
+            local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+            local fps = math.floor(1 / RunService.RenderStepped:Wait())
+            local cpu = math.clamp((mem / 2048) * 100, 1, 100)
+            local is_exe = identifyexecutor and identifyexecutor() or "Không rõ"
 
-simpleLog(LocalPlayer.Name.." đã vào game • Job: "..JobId)
---// ---------------------------------------------------------------------------
+            local desc = table.concat({
+                "👤 **Account**: `" .. LP.Name .. "` (" .. LP.DisplayName .. ")",
+                "🌐 **Ping**: `" .. ping .. "ms`",
+                "💾 **Memory**: `" .. mem .. " MB`",
+                "⚙️ **CPU Ước lượng**: `" .. math.floor(cpu) .. "%`",
+                "📊 **FPS**: `" .. fps .. "`",
+                "🕒 **Thời gian online**: `" .. math.floor(uptime) .. " giây`",
+                "🖥️ **Executor**: `" .. tostring(is_exe) .. "`",
+                "📡 **JobId**: `" .. JobId .. "`"
+            }, "\n")
 
-
---// DATA HANDLERS --------------------------------------------------------------
-local layouts = cfg"AlertLayouts"
-
-local function processStock(data, lType:string, layout)
-    if not layout.Layout then return end
-    local fields={}
-    for path,title in layout.Layout do
-        local packet = getPacket(data,path); if not packet then return end
-        table.insert(fields,{name=title,value=stockString(packet),inline=true})
+            sendEmbed("📟 Trạng thái hệ thống (1s)", desc, 0x1abc9c)
+        end)
+        wait(1)
     end
-    webhookSend(lType, fields)
-end
-
-DataStream.OnClientEvent:Connect(function(kind, profile, data)
-    if kind~="UpdateData" or not profile:find(LocalPlayer.Name) then return end
-    for lType,layout in layouts do processStock(data,lType,layout) end
 end)
-
-WeatherEventStarted.OnClientEvent:Connect(function(event,len)
-    if not cfg"Weather Reporting" then return end
-    local endUnix = math.round(workspace:GetServerTimeNow())+len
-    webhookSend("Weather",{{
-        name  ="WEATHER",
-        value = event.."\nKết thúc: <t:"..endUnix..":R>",
-        inline=true
-    }})
-end)
---// ---------------------------------------------------------------------------
-
-
---// ANTI‑AFK -------------------------------------------------------------------
-if cfg"Anti-AFK" then
-    LocalPlayer.Idled:Connect(function()
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-        simpleLog(LocalPlayer.Name.." • Anti‑AFK kích hoạt lúc "..os.date("%X"))
-    end)
-end
---// ---------------------------------------------------------------------------
-
-
---// AUTO‑REJOIN ----------------------------------------------------------------
-if cfg"Auto-Reconnect" then
-    GuiService.ErrorMessageChanged:Connect(function()
-        simpleLog(LocalPlayer.Name.." bị disconnect • Rejoin sau 5s…")
-        queue_on_teleport("loadstring(game:HttpGet('https://raw.githubusercontent.com/NguyenNhandz/new/main/demo.lua'))()")
-        wait(5)
-        if #Players:GetPlayers()<=1 then
-            TeleportService:Teleport(PlaceId,LocalPlayer)
-        else
-            TeleportService:TeleportToPlaceInstance(PlaceId,JobId,LocalPlayer)
-        end
-    end)
-end
---// ---------------------------------------------------------------------------
-
---=== END OF SCRIPT ===--
